@@ -647,11 +647,12 @@ predict(bsBasis, age=testing$age)
 ```
 
 ##### Notes and Further Reading
+What are the salient differences that are likely to occur between samples?
 * Level 1 feature creation (raw data to covariates)
   * Science is key. Google 'feature extraction for [data type]'
   * Err on overcreation of features
   * In some applications (images, voices) automated feature creation is possible and/or necessary
-  * Check out [NYU's site on the subject](http://www.cs.nyu.edu/~yann/talks/lecun-ranzato-icml2013.pdf)
+  * Check out [NYU's site on DEEP LEARNING](http://www.cs.nyu.edu/~yann/talks/lecun-ranzato-icml2013.pdf)
 * Level 2 feature creation (covariates to new covariates)
   * The function preProcess in caret will handle some preprocessing
   * Create new covaraites if you think they will improve fit
@@ -659,7 +660,226 @@ predict(bsBasis, age=testing$age)
   * Be careful about OVERFITTING!
 * Learn more about pre-processing in caret
 * If you want to fit spline models, use 'gam' method in caret which allows smoothing of multiple variables
-* More feature creation/data tidying in the 'Obtaining Data' course from Data School
+* More feature creation/data tidying in the 'Obtaining Data' course from Data Science Specialization
+
+
+## Preprocessing with Principal Components Analysis
+Often you have multiple quantitative variables that are highly correlated. Not always useful to use all variables.
+```{r}
+library(caret); library(kernlab); data(spam)
+inTrain <- createDataPartition(y=spam$type, p=0.75, list=FALSE)
+#training <- spam[inTrain,]
+#testing <- spam[-inTrain,]
+#M <- abs(cor(training[,-58]))
+#diag(M) <- 0
+#which(M > 0.8, arr.id=TRUE)
+names(spam)[c(34,32)]
+plot(spam[,34], spam[,32]) # proves they are highly correlated
+```
+
+##### Basic Principal Component Analysis (PCA) Idea
+  
+  * We might not need every predictor
+  * A weighted combination of predictors might be better
+  * We should pick this combination to capture the "most information" we can
+  * Benefits include (1) reduced number of predictors and (2) reduced noise (thanks to averages)
+
+Once you figure out the combination of variables that explain most of the variability then you can start plotting.
+```{r}
+#X <- 0.71*training$num415 + 0.71*training$num857 #sum of two vars for x axis
+#Y <- 0.71*training$num415 - 0.71*training$num857 #difference of two vars for y axis
+#plot(X, Y)
+```
+The sum is a better predictor.
+
+  * Find a new set of multivariate variables that are uncorrelated and explain as much variance as possible. This goal is STATISTICAL
+  * If you put all the variables together in one matrix, find the best matrix created with fewest variables (lower rank) that explains the original data. This goal is DATA COMPRESSION
+  
+Can we use fewer variables to explain almost everything that is going on?
+
+##### Related Solutions: PCA/SVD
+SVD: If X is a matrix with each variable in a column and each observation in a row then the SVD is the 'matrix decomposition' where three matrices (UDV)
+
+X = UDV^T
+
+and where the columns of U are orthogonal (left singular vectors), the columns of V are orthogonal (right singular vectors), and D is a diagonal matrix (singular values).
+
+PCA: The principal components are equal to teh right singular variables if you first scale (subtract mean and divide by std. dev.) the variables,
+
+###### Principal Components in R: prcomp
+```{r}
+smallSpam <- spam[,c(34, 32)] # two vars highly corr with each other
+prComp <- prcomp(smallSpam) # principal components on just those two vars
+plot(prComp$x[,1], prComp$x[,2])
+# Rotation matrix, how it sums up components
+prComp$rotation
+```
+
+Principal component analysis on SPAM data
+```{r}
+typeColor <- ((spam$type=='spam')*1 + 1) #color equals black if not spam, red if spam
+prComp <- prcomp(log10(spam[,-58] + 1)) #calcs principal components on entire dataset with log10 transformation (looks more gaussian)
+plot(prComp$x[,1], prComp$x[,2], col=typeColor, xlab='PC1', ylab='PC2') #plot first and second most imoprtant principal components
+```
+
+###### Principal Components with caret
+```{r}
+# preProcess does a similar observation; method PCA, and number of principal components (2)
+preProc <- preProcess(log10(spam[,-58]+1), method='pca', pcaComp=2)
+# Calculate values of each new principal component; predict on new observations 
+spamPC <- predict(preProc, log10(spam[,-58] + 1))
+plot(spamPC[,1], spamPC[,2], col=typeColor)
+```
+
+```{r}
+#trainPC <- predict(preProc, log10(training[,-58]+1))
+#modelFit <- train(training$type~., method='glm', data=trainPC)
+```
+
+In the testing dataset you must use the same principal components as you used in the training dataset. 
+```{r}
+#testPC <- predict(preProc, log10(testing[,-58]+1))
+#confusionMatrix(testing$type, predict(modelFit, testPC))
+```
+
+The easiest way to do all this is as follows.
+```{r}
+#modelFit <- train(training$type ~., method='glm', preProcess='pca', data=training)
+#confusionMatrix(testing$type, predict(modelFit, testing))
+```
+
+This is most useful for linear models. It can make it harder to interpret the predictors. You must watch out for outliers! 
+  * Transform first with logs/box cox
+  * Plot predictors to ID problems
+  * Elements of Statistical Learning is a very important book! Read it.
+
+
+## Predicting with Regression 
+Pros: Easy to implement and interpret.
+Cons: Often poor performance in nonlinear settings.
+
+###### Old Faithful 
+Eruption time and waiting time data for Old Faithful.
+```{r}
+library(caret); data(faithful); set.seed(333)
+inTrain <- createDataPartition(y=faithful$waiting, p=0.5, list=FALSE)
+trainFaith <- faithful[inTrain,]
+testFaith <- faithful[-inTrain,]
+head(trainFaith)
+plot(trainFaith$waiting, trainFaith$eruptions, pch=19, col='blue', xlab='waiting',
+     ylab='Duration')
+```
+Notice the linear qualities. We can fit a line here. Eruption duration is equal to a constant plus a coefficient multiplied by waiting time (with some error). The estimates 
+```{r}
+lm1 <- lm(eruptions ~ waiting, data=trainFaith)
+summary(lm1)
+plot(trainFaith$waiting, trainFaith$eruptions, pch=19, col='blue',
+     xlab='waiting', ylab='duration')
+lines(trainFaith$waiting, lm1$fitted, lwd=3)
+```
+To predict a new value from new data run the code below. Youtake estimated values of coefficients (hats) and multiply them together from the previous page; excluding error term.
+```{r}
+coef(lm1)[1] + coef(lm1)[2]*80 # this is doing it by hand, beta one and beta not
+newdata <- data.frame(waiting=80) # telling it we want to predict new value of waiting = 80
+predict(lm1, newdata) # this is doing it the easier way
+```
+
+##### Plot Predictions from Training & Test Data
+```{r}
+par(mfrow=c(1,2))
+plot(trainFaith$waiting, trainFaith$eruptions, pch=19, col='blue', 
+     xlab='waiting', ylab='duration')
+lines(trainFaith$waiting, predict(lm1), lwd=3)
+plot(testFaith$waiting, testFaith$eruptions, pch=19, col='green',
+     xlab='waiting', ylab='duration')
+lines(testFaith$waiting, predict(lm1, newdata=testFaith), lwd=3)
+```
+
+##### Get Training Set/Test Set Errors
+Calculate RMSE on training set.
+```{r}
+sqrt(sum((lm1$fitted-trainFaith$eruptions)^2)) # RMSE on training
+sqrt(sum((predict(lm1, newdata=testFaith)-testFaith$eruptions)^2)) # RMSE on test
+```
+
+##### Prediction Intervals
+Graphically display prediction confidence intervals using matlines() function.
+```{r}
+pred1 <- predict(lm1, newdata=testFaith, interval='prediction') # calc new set of predictions using test data, also tell it we want prediction intervals as output
+ord <- order(testFaith$waiting)
+plot(testFaith$waiting, testFaith$eruptions, pch=19, col='blue')
+matlines(testFaith$waiting[ord], pred1[ord,], type='l',
+         col=c(1,2,2), lty=c(1,1,1), lwd=3)
+```
+You can do the same process with caret.
+```{r}
+library(caret)
+modFit <- train(eruptions ~ waiting, data=trainFaith, method='lm')
+summary(modFit$finalModel)
+```
+
+
+## Prediction with Regression Using Multiple Covariates
+###### Prediction Wages from ISLR Package
+```{r}
+library(ISLR); library(ggplot2); library(caret)
+data(Wage); Wage - subset(Wage, select=c(logwage))
+summary(Wage)
+```
+Get training and test sets.
+```{r}
+inTrain <- createDataPartition(y=Wage$wage, p=0.7, list=FALSE)
+training <- Wage[inTrain,]; testing <- Wage[-inTrain,]
+dim(training); dim(testing)
+```
+
+###### Feature Plot
+Shows how variables are related to each other. It is not always useful.
+```{r}
+featurePlot(x=training[,c('age', 'education', 'jobclass')],
+            y=training$wage, plot='pairs')
+```
+
+To explore further, look at plots with 3 dimensions.
+```{r}
+qplot(age, wage, data=training)
+qplot(age, wage, data=training, colour=education)
+qplot(age, wage, data=training, colour=jobclass)
+```
+
+##### Fit a Linear Model
+```{r}
+modFit <- train(wage ~ age + jobclass + education, method='lm', data=training)
+finMod <- modFit$finalModel
+print(modFit)
+```
+Now run diagnostic plots. Shows fitted values and the residuals; you want them to center on 0. 
+```{r}
+par(mfrow=c(1,1))
+plot(finMod, 1, pch=19, cex=0.5, col='#00000010')
+```
+It is also useful to plot by index. The dataset comes in rows in a particular order. All high residuals are happening at the end of the row numbers. When you can see at rend here it suggests there is a variable missing from your model. May bemissing time or age?
+```{r}
+plot(finMod$residuals, pch=19)
+```
+
+##### Predicted vs. Truth in Test Set
+```{r}
+pred <- predict(modFit, testing)
+qplot(wage, pred, colour=factor(year), data=testing)
+```
+
+If you want to use all of the covariates in your model building then you can use the train function and model it on all of the variables.
+```{rp}
+modFitAll <- train(wage ~., data=training, method='lm')
+pred <- predict(modFitAll, testing)
+qplot(wage, pred, data=testing)
+```
+
+Linear regression is useful in conjunction with other types of models. Use exploratory analysis to find these patterns in the data.
+
+# Week 3
+## Predicting with Trees
 
 
 
@@ -668,11 +888,40 @@ predict(bsBasis, age=testing$age)
 
 
 
+## Bagging
 
 
 
 
 
+
+
+
+## Random Forests
+
+
+
+
+
+
+
+
+## Boosting
+
+
+
+
+
+
+
+## Model Based Prediction
+
+
+# Week 4
+## Regularized Regression
+## Combining Predictors
+## Forecasting
+## Unsupervised Prediction
 
 
 
